@@ -1,4 +1,4 @@
-module github.com/HealthyBuilder/blueshift_anchor_vault/clients/go
+module github.com/HealthyBuilder/anchor_vault_solana_go/clients/go
 
 go 1.25.0
 

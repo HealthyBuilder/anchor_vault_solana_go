@@ -26,7 +26,7 @@ import (
 	"github.com/solana-foundation/solana-go/v2/rpc/jsonrpc"
 	"github.com/solana-foundation/solana-go/v2/rpc/ws"
 
-	vault "github.com/HealthyBuilder/blueshift_anchor_vault/clients/go/generated"
+	vault "github.com/HealthyBuilder/anchor_vault_solana_go/clients/go/generated"
 )
 
 func main() {
