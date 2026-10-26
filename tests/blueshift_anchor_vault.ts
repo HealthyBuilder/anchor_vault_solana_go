@@ -12,49 +12,49 @@ describe("blueshift_anchor_vault", () => {
     .blueshiftAnchorVault as Program<BlueshiftAnchorVault>;
   const signer = provider.wallet.publicKey;
 
-  // 金库 PDA：seeds = ["vault", signer]
+  // Vault PDA: seeds = ["vault", signer]
   const [vault] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault"), signer.toBuffer()],
     program.programId
   );
   const accounts = { signer, vault, systemProgram: SystemProgram.programId };
 
-  it("拒绝低于免租金额的存款", async () => {
+  it("rejects a deposit below the rent-exempt minimum", async () => {
     try {
       await program.methods.deposit(new anchor.BN(1)).accounts(accounts).rpc();
-      expect.fail("应当失败");
+      expect.fail("should have failed");
     } catch (e: any) {
       expect(e.error.errorCode.code).to.equal("InvalidAmount");
     }
   });
 
-  it("存入 1 SOL", async () => {
+  it("deposits 1 SOL", async () => {
     const amount = 1 * LAMPORTS_PER_SOL;
     await program.methods.deposit(new anchor.BN(amount)).accounts(accounts).rpc();
     expect(await provider.connection.getBalance(vault)).to.equal(amount);
   });
 
-  it("重复存款失败", async () => {
+  it("fails on a second deposit", async () => {
     try {
       await program.methods
         .deposit(new anchor.BN(LAMPORTS_PER_SOL))
         .accounts(accounts)
         .rpc();
-      expect.fail("应当失败");
+      expect.fail("should have failed");
     } catch (e: any) {
       expect(e.error.errorCode.code).to.equal("VaultAlreadyExists");
     }
   });
 
-  it("取出全部余额", async () => {
+  it("withdraws the full balance", async () => {
     await program.methods.withdraw().accounts(accounts).rpc();
     expect(await provider.connection.getBalance(vault)).to.equal(0);
   });
 
-  it("空金库取款失败", async () => {
+  it("fails to withdraw from an empty vault", async () => {
     try {
       await program.methods.withdraw().accounts(accounts).rpc();
-      expect.fail("应当失败");
+      expect.fail("should have failed");
     } catch (e: any) {
       expect(e.error.errorCode.code).to.equal("InvalidAmount");
     }

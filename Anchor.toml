@@ -18,7 +18,8 @@ wallet = "~/.config/solana/id.json"
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
 
-# 挑战要求的程序 ID 2222... 没有对应私钥，本地测试时通过 genesis 直接加载 .so
+# The challenge requires program ID 2222..., which has no private key,
+# so the local validator loads the .so at that address via genesis.
 [[test.genesis]]
 address = "22222222222222222222222222222222222222222222"
 program = "target/deploy/blueshift_anchor_vault.so"

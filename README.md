@@ -1,126 +1,133 @@
-# Blueshift Anchor Vault
+# Anchor Vault + solana-go v2
 
-[Blueshift Anchor 金库挑战](https://learn.blueshift.gg/zh-CN/challenges/anchor-vault) 的参考实现：每个用户有一个由 PDA 托管的 SOL 金库，可以存入（deposit）和全部取出（withdraw）。
+An end-to-end demo: **Anchor program → IDL → Codama → Go client → on-chain interaction with [solana-go v2](https://github.com/solana-foundation/solana-go)**.
 
-## 核心知识点
-
-| 概念 | 代码位置 |
-| --- | --- |
-| PDA 派生：`seeds = [b"vault", signer]` + `bump` | `VaultAction.vault` |
-| `SystemAccount`：只存 lamports、归 System Program 所有的账户 | `VaultAction.vault` |
-| 普通 CPI：`CpiContext::new`（signer 自己签名） | `deposit` |
-| PDA 签名 CPI：`CpiContext::new_with_signer` + `ctx.bumps.vault` | `withdraw` |
-| 免租金最低余额：`Rent::get()?.minimum_balance(0)` | `deposit` |
-| 自定义错误：`#[error_code]` + `require_*!` 宏 | `VaultError` |
-
-## 构建 & 测试
-
-```bash
-anchor build          # 产物：target/deploy/blueshift_anchor_vault.so
-anchor test --skip-build
-```
-
-提交挑战：在挑战页面点击 "take challenge"，上传 `target/deploy/blueshift_anchor_vault.so`。
-
-## 说明
-
-- 挑战要求程序 ID 为 `22222222222222222222222222222222222222222222`，这个地址没有私钥，无法 `anchor deploy`。
-  所以 `Anchor.toml` 中用 `[[test.genesis]]` 让本地验证器在启动时直接把 `.so` 加载到该地址。
-- 如果 `anchor build` 报 `feature edition2024 is required`：Solana platform-tools 内置的 cargo 版本较旧，
-  新版依赖不兼容。解决方法：
-  ```bash
-  CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo update -p blake3 --precise 1.5.5
-  ```
-  （本项目已在程序 `Cargo.toml` 中设置 `rust-version = "1.84"`，项目里也已包含锁定好的 `Cargo.lock`。）
-
----
-
-# Go 客户端：Codama + solana-go v2
-
-这一部分演示：**Anchor 程序 → IDL → Codama → Go 客户端 → 用 solana-go v2 与链上交互**。
+The program is a reference solution to the [Blueshift Anchor Vault challenge](https://learn.blueshift.gg/en/challenges/anchor-vault): every user gets a PDA-held SOL vault they can deposit into and withdraw everything from.
 
 ```
 programs/…/lib.rs ──anchor build──▶ target/idl/blueshift_anchor_vault.json
                                           │
                        scripts/generate-go-client.mjs (Codama)
                                           ▼
-                              clients/go/generated/*.go   ◀── 自动生成，勿手改
+                              clients/go/generated/*.go   ◀── generated, do not edit
                                           │
-                              clients/go/cmd/demo/main.go ◀── 用 solana-go v2 调用
+                              clients/go/cmd/demo/main.go ◀── calls it with solana-go v2
 ```
 
-## 目录
+## Layout
 
-| 路径 | 说明 |
+| Path | Description |
 | --- | --- |
-| `scripts/generate-go-client.mjs` | Codama 生成脚本：`rootNodeFromAnchor` 读 IDL，`@codama/renderers-go` 渲染 Go 代码 |
-| `clients/go/generated/` | 生成的 Go 包 `blueshift_anchor_vault` |
-| `clients/go/cmd/demo/main.go` | 交互 demo：空投 → deposit → 重复 deposit（报错）→ withdraw |
+| `programs/blueshift_anchor_vault/src/lib.rs` | The Anchor vault program (`deposit` / `withdraw`) |
+| `scripts/generate-go-client.mjs` | Codama script: `rootNodeFromAnchor` reads the IDL, `@codama/renderers-go` renders Go code |
+| `clients/go/generated/` | Generated Go package `blueshift_anchor_vault` |
+| `clients/go/cmd/demo/main.go` | Demo: airdrop → deposit → second deposit (error) → withdraw |
+| `tests/blueshift_anchor_vault.ts` | Anchor TypeScript tests |
 
-生成的文件：
+## The program
 
-| 文件 | 内容 |
+| Concept | Where |
 | --- | --- |
-| `instructions.go` | `ProgramID`、`Instruction` 包装类型（实现 `solana.Instruction`）、`DecodeInstruction` |
-| `instruction_deposit.go` / `instruction_withdraw.go` | 指令 builder：`SetAmount` / `SetSignerAccount` / `SetVaultAccount` … `ValidateAndBuild()`，带 Anchor 8 字节 discriminator |
-| `pdas.go` | `FindVaultPDA(signer)`：IDL 里的 `seeds = ["vault", signer]` 直接变成了 Go 函数 |
-| `errors.go` | `BlueshiftAnchorVaultError`：`VaultAlreadyExistsError = 6000`、`InvalidAmountError = 6001` |
+| PDA derivation: `seeds = [b"vault", signer]` + `bump` | `VaultAction.vault` |
+| `SystemAccount`: an account owned by the System Program that only holds lamports | `VaultAction.vault` |
+| Plain CPI: `CpiContext::new` (signed by the user) | `deposit` |
+| PDA-signed CPI: `CpiContext::new_with_signer` + `ctx.bumps.vault` | `withdraw` |
+| Rent-exempt minimum: `Rent::get()?.minimum_balance(0)` | `deposit` |
+| Custom errors: `#[error_code]` + `require_*!` macros | `VaultError` |
 
-## 关于 solana-go v2
+## The generated Go client
 
-`@codama/renderers-go` 目前生成的 import 是 v1 的 `github.com/gagliardetto/solana-go`。
-v2 的 API 与 v1 一致，只是模块路径变成了 `github.com/solana-foundation/solana-go/v2`，
-所以生成脚本最后一步把 import 改写成 v2（`github.com/gagliardetto/binary` 在 v2 中仍在使用，保持不变）。
+| File | Contents |
+| --- | --- |
+| `instructions.go` | `ProgramID`, the `Instruction` wrapper (implements `solana.Instruction`), `DecodeInstruction` |
+| `instruction_deposit.go` / `instruction_withdraw.go` | Instruction builders: `SetAmount` / `SetSignerAccount` / `SetVaultAccount` … `ValidateAndBuild()`, with the 8-byte Anchor discriminator |
+| `pdas.go` | `FindVaultPDA(signer)`: the IDL's `seeds = ["vault", signer]` turned into a Go function |
+| `errors.go` | `BlueshiftAnchorVaultError`: `VaultAlreadyExistsError = 6000`, `InvalidAmountError = 6001` |
 
-## 运行
+### Targeting solana-go v2
+
+`@codama/renderers-go` currently emits v1 imports (`github.com/gagliardetto/solana-go`).
+v2 keeps the same API under the new module path `github.com/solana-foundation/solana-go/v2`,
+so the last step of the generator script rewrites the imports to v2.
+`github.com/gagliardetto/binary` is still used by v2 and is left unchanged.
+
+## Running
+
+Prerequisites: Rust, Solana CLI, Anchor 0.31, Node.js + Yarn, Go 1.25+.
 
 ```bash
-# 1. 编译程序，得到 .so 和 IDL
+# 1. Build the program: produces the .so and the IDL
 anchor build
 
-# 2. 生成 Go 客户端
+# 2. Generate the Go client
 yarn install
 yarn generate:go
 
-# 3. 启动本地验证器，把 .so 直接加载到 2222… 地址（这个地址没有私钥，不能 anchor deploy）
+# 3. Start a local validator with the .so loaded at 2222…
+#    (this address has no private key, so `anchor deploy` cannot be used)
 solana-test-validator --reset \
   --bpf-program 22222222222222222222222222222222222222222222 target/deploy/blueshift_anchor_vault.so
 
-# 4. 另开一个终端运行 demo
+# 4. In another terminal, run the demo
 cd clients/go
 go run ./cmd/demo
 ```
 
-可以用 `RPC_URL` / `WS_URL` 环境变量连接其他集群。
+Set `RPC_URL` / `WS_URL` to point the demo at another cluster.
 
-预期输出：
+Expected output:
 
 ```
-用户钱包: EgRBEk3L…
-空投 2 SOL 完成
-金库 PDA:  J7iQGzHt… (bump 255)
-  用户余额: 2.000000 SOL
-  金库余额: 0.000000 SOL
+User wallet:  EgRBEk3L…
+Airdropped 2 SOL
+Vault PDA:   J7iQGzHt… (bump 255)
+  User balance:  2.000000 SOL
+  Vault balance: 0.000000 SOL
 
-[deposit] 存入 1 SOL, tx: 56Ric7a8…
-  用户余额: 0.999995 SOL
-  金库余额: 1.000000 SOL
+[deposit] deposited 1 SOL, tx: 56Ric7a8…
+  User balance:  0.999995 SOL
+  Vault balance: 1.000000 SOL
 
-[deposit again] 被程序拒绝: Vault already exists (code 6000)
+[deposit again] rejected by the program: Vault already exists (code 6000)
 
-[withdraw] 取回全部 lamports, tx: 3j2PSspm…
-  用户余额: 1.999990 SOL
-  金库余额: 0.000000 SOL
+[withdraw] withdrew all lamports, tx: 3j2PSspm…
+  User balance:  1.999990 SOL
+  Vault balance: 0.000000 SOL
 ```
 
-## Demo 里用到的 solana-go v2 API
+To run the Anchor TypeScript tests instead (`Anchor.toml` loads the program at `2222…` through `[[test.genesis]]`):
 
-| 步骤 | API |
+```bash
+anchor test --skip-build
+```
+
+## solana-go v2 APIs used in the demo
+
+| Step | API |
 | --- | --- |
-| 连接 | `rpc.New(rpc.LocalNet_RPC)`、`ws.Connect(ctx, rpc.LocalNet_WS)` |
-| 钱包 / 空投 | `solana.NewWallet()`、`client.RequestAirdrop` |
-| 组装交易 | `client.GetLatestBlockhash` + `solana.NewTransaction(ixs, blockhash, solana.TransactionPayer(...))` |
-| 签名 | `tx.Sign(func(pubkey) *solana.PrivateKey { … })` |
-| 发送 | `client.SendTransactionWithOpts`（预检失败时返回 `*jsonrpc.RPCError`） |
-| 确认 | `wsClient.SignatureSubscribe(sig, rpc.CommitmentConfirmed)` |
-| 自定义错误 | 从 `RPCError.Data` 取 `{"InstructionError":[0,{"Custom":6000}]}`，转换为生成的 `BlueshiftAnchorVaultError` |
+| Connect | `rpc.New(rpc.LocalNet_RPC)`, `ws.Connect(ctx, rpc.LocalNet_WS)` |
+| Wallet / airdrop | `solana.NewWallet()`, `client.RequestAirdrop` |
+| Build a transaction | `client.GetLatestBlockhash` + `solana.NewTransaction(ixs, blockhash, solana.TransactionPayer(...))` |
+| Sign | `tx.Sign(func(pubkey) *solana.PrivateKey { … })` |
+| Send | `client.SendTransactionWithOpts` (returns a `*jsonrpc.RPCError` when preflight fails) |
+| Confirm | `wsClient.SignatureSubscribe(sig, rpc.CommitmentConfirmed)` |
+| Custom errors | Read `{"InstructionError":[0,{"Custom":6000}]}` from `RPCError.Data` and convert it to the generated `BlueshiftAnchorVaultError` |
+
+## Troubleshooting
+
+If `anchor build` fails with `feature edition2024 is required`, the cargo bundled with Solana platform-tools is too old for a newer dependency. Pin it with:
+
+```bash
+CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo update -p blake3 --precise 1.5.5
+```
+
+(The program's `Cargo.toml` already sets `rust-version = "1.84"`, and the committed `Cargo.lock` is pinned.)
+
+If the demo fails with `InvalidProgramForExecution` or the slot number looks far too high, another RPC server is already listening on port 8899. Start the validator on other ports and point the demo at them:
+
+```bash
+solana-test-validator --reset --rpc-port 8999 --faucet-port 9910 \
+  --bpf-program 22222222222222222222222222222222222222222222 target/deploy/blueshift_anchor_vault.so
+
+RPC_URL=http://127.0.0.1:8999 WS_URL=ws://127.0.0.1:9000 go run ./cmd/demo
+```

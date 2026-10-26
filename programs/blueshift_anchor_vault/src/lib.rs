@@ -7,23 +7,24 @@ declare_id!("22222222222222222222222222222222222222222222");
 pub mod blueshift_anchor_vault {
     use super::*;
 
-    /// 存款：把 lamports 从 signer 转入金库 PDA
+    /// Deposit: transfer lamports from the signer into the vault PDA.
     pub fn deposit(ctx: Context<VaultAction>, amount: u64) -> Result<()> {
-        // 1. 金库必须为空（每个用户只能存一次，防止重复存款）
+        // 1. The vault must be empty (one deposit per user, prevents double deposits).
         require_eq!(
             ctx.accounts.vault.lamports(),
             0,
             VaultError::VaultAlreadyExists
         );
 
-        // 2. 金额必须大于 0 字节账户的免租金最低余额，否则金库账户无法存活
+        // 2. The amount must exceed the rent-exempt minimum of a 0-byte account,
+        //    otherwise the vault account cannot exist.
         require_gt!(
             amount,
             Rent::get()?.minimum_balance(0),
             VaultError::InvalidAmount
         );
 
-        // 3. 通过 System Program 的 Transfer CPI 转账（signer 自己签名）
+        // 3. Transfer via a System Program CPI (signed by the signer itself).
         transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -38,17 +39,17 @@ pub mod blueshift_anchor_vault {
         Ok(())
     }
 
-    /// 取款：把金库中的全部 lamports 转回 signer
+    /// Withdraw: transfer all lamports in the vault back to the signer.
     pub fn withdraw(ctx: Context<VaultAction>) -> Result<()> {
-        // 1. 金库里必须有钱
+        // 1. The vault must hold some lamports.
         require_neq!(ctx.accounts.vault.lamports(), 0, VaultError::InvalidAmount);
 
-        // 2. 金库是 PDA，没有私钥，需要用 seeds + bump 让程序代为签名
+        // 2. The vault is a PDA with no private key; the program signs for it with seeds + bump.
         let signer_key = ctx.accounts.signer.key();
         let signer_seeds: &[&[&[u8]]] =
             &[&[b"vault", signer_key.as_ref(), &[ctx.bumps.vault]]];
 
-        // 3. 把金库全部余额转回 signer
+        // 3. Transfer the whole vault balance back to the signer.
         transfer(
             CpiContext::new_with_signer(
                 ctx.accounts.system_program.to_account_info(),
@@ -67,11 +68,11 @@ pub mod blueshift_anchor_vault {
 
 #[derive(Accounts)]
 pub struct VaultAction<'info> {
-    /// 金库所有者；lamports 会变化，所以需要 mut
+    /// Vault owner; its lamports change, so it must be mut.
     #[account(mut)]
     pub signer: Signer<'info>,
 
-    /// 金库 PDA：seeds = ["vault", signer]；由 System Program 拥有，只存 lamports
+    /// Vault PDA: seeds = ["vault", signer]; owned by the System Program, holds only lamports.
     #[account(
         mut,
         seeds = [b"vault", signer.key().as_ref()],
@@ -79,7 +80,7 @@ pub struct VaultAction<'info> {
     )]
     pub vault: SystemAccount<'info>,
 
-    /// 用于 Transfer CPI；Anchor 会校验其地址与可执行性
+    /// Used for the Transfer CPI; Anchor checks its address and that it is executable.
     pub system_program: Program<'info, System>,
 }
 

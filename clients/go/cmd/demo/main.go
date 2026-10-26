@@ -1,13 +1,15 @@
-// 用 Codama 生成的 Go 客户端 + solana-go v2 与 Anchor 金库程序交互。
+// Interact with the Anchor vault program using the Codama-generated Go client
+// and solana-go v2.
 //
-// 演示流程：
-//  1. 生成一个新钱包并空投 SOL
-//  2. 用生成的 FindVaultPDA 推导金库地址
-//  3. deposit：存入 1 SOL
-//  4. 再次 deposit：程序返回自定义错误 VaultAlreadyExists，用生成的错误类型解析
-//  5. withdraw：把金库里的 lamports 全部取回
+// Steps:
+//  1. Create a new wallet and airdrop SOL to it
+//  2. Derive the vault address with the generated FindVaultPDA
+//  3. deposit: put 1 SOL into the vault
+//  4. deposit again: the program returns the custom error VaultAlreadyExists,
+//     decoded into the generated error type
+//  5. withdraw: take all lamports back out of the vault
 //
-// 运行前先启动本地验证器（见 README）：
+// Start a local validator first (see README):
 //
 //	go run ./cmd/demo
 package main
@@ -42,9 +44,9 @@ func main() {
 	}
 	defer wsClient.Close()
 
-	// ---------- 1. 新钱包 + 空投 ----------
+	// ---------- 1. New wallet + airdrop ----------
 	user := solana.NewWallet()
-	fmt.Println("用户钱包:", user.PublicKey())
+	fmt.Println("User wallet: ", user.PublicKey())
 
 	sig, err := client.RequestAirdrop(ctx, user.PublicKey(), 2*solana.LAMPORTS_PER_SOL, rpc.CommitmentConfirmed)
 	if err != nil {
@@ -53,14 +55,14 @@ func main() {
 	if err := waitConfirmed(ctx, wsClient, sig); err != nil {
 		log.Fatalf("airdrop confirm: %v", err)
 	}
-	fmt.Println("空投 2 SOL 完成")
+	fmt.Println("Airdropped 2 SOL")
 
-	// ---------- 2. 推导金库 PDA（seeds = ["vault", signer]）----------
+	// ---------- 2. Derive the vault PDA (seeds = ["vault", signer]) ----------
 	vaultPDA, bump, err := vault.FindVaultPDA(user.PublicKey())
 	if err != nil {
 		log.Fatalf("find vault pda: %v", err)
 	}
-	fmt.Printf("金库 PDA:  %s (bump %d)\n", vaultPDA, bump)
+	fmt.Printf("Vault PDA:   %s (bump %d)\n", vaultPDA, bump)
 	printBalances(ctx, client, user.PublicKey(), vaultPDA)
 
 	// ---------- 3. deposit 1 SOL ----------
@@ -78,15 +80,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("deposit: %v", err)
 	}
-	fmt.Println("\n[deposit] 存入 1 SOL, tx:", sig)
+	fmt.Println("\n[deposit] deposited 1 SOL, tx:", sig)
 	printBalances(ctx, client, user.PublicKey(), vaultPDA)
 
-	// ---------- 4. 再次 deposit：预期失败 ----------
-	// Build() 返回的 Instruction 与 builder 共享数据，可以直接复用
+	// ---------- 4. deposit again: expected to fail ----------
+	// The Instruction returned by Build() aliases the builder, so it can be reused as is.
 	_, err = sendTx(ctx, client, wsClient, user, depositIx)
 	var vaultErr vault.BlueshiftAnchorVaultError
 	if errors.As(err, &vaultErr) {
-		fmt.Printf("\n[deposit again] 被程序拒绝: %s (code %d)\n", vaultErr, vaultErr.Code())
+		fmt.Printf("\n[deposit again] rejected by the program: %s (code %d)\n", vaultErr, vaultErr.Code())
 	} else {
 		log.Fatalf("expected VaultAlreadyExists, got: %v", err)
 	}
@@ -105,12 +107,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("withdraw: %v", err)
 	}
-	fmt.Println("\n[withdraw] 取回全部 lamports, tx:", sig)
+	fmt.Println("\n[withdraw] withdrew all lamports, tx:", sig)
 	printBalances(ctx, client, user.PublicKey(), vaultPDA)
 }
 
-// sendTx 组装交易、签名、发送，并等待 confirmed。
-// 如果预检（simulate）阶段程序返回了自定义错误，会转换成生成的 BlueshiftAnchorVaultError。
+// sendTx builds, signs and sends a transaction, then waits for it to be confirmed.
+// A custom program error returned during preflight (simulation) is converted
+// into the generated BlueshiftAnchorVaultError.
 func sendTx(ctx context.Context, client *rpc.Client, wsClient *ws.Client, payer *solana.Wallet, ixs ...solana.Instruction) (solana.Signature, error) {
 	recent, err := client.GetLatestBlockhash(ctx, rpc.CommitmentConfirmed)
 	if err != nil {
@@ -142,7 +145,7 @@ func sendTx(ctx context.Context, client *rpc.Client, wsClient *ws.Client, payer 
 	return sig, waitConfirmed(ctx, wsClient, sig)
 }
 
-// waitConfirmed 通过 WebSocket 订阅签名状态，直到交易达到 confirmed。
+// waitConfirmed subscribes to the signature over WebSocket until the transaction is confirmed.
 func waitConfirmed(ctx context.Context, wsClient *ws.Client, sig solana.Signature) error {
 	sub, err := wsClient.SignatureSubscribe(sig, rpc.CommitmentConfirmed)
 	if err != nil {
@@ -163,7 +166,7 @@ func waitConfirmed(ctx context.Context, wsClient *ws.Client, sig solana.Signatur
 	return nil
 }
 
-// customErrorCode 从预检失败的 RPC 错误中取出程序自定义错误码：
+// customErrorCode extracts the program's custom error code from a failed preflight RPC error:
 //
 //	{"err": {"InstructionError": [0, {"Custom": 6000}]}, "logs": [...]}
 func customErrorCode(err error) (uint32, bool) {
@@ -189,8 +192,8 @@ func customErrorCode(err error) (uint32, bool) {
 }
 
 func printBalances(ctx context.Context, client *rpc.Client, user, vaultPDA solana.PublicKey) {
-	fmt.Printf("  用户余额: %.6f SOL\n", sol(balance(ctx, client, user)))
-	fmt.Printf("  金库余额: %.6f SOL\n", sol(balance(ctx, client, vaultPDA)))
+	fmt.Printf("  User balance:  %.6f SOL\n", sol(balance(ctx, client, user)))
+	fmt.Printf("  Vault balance: %.6f SOL\n", sol(balance(ctx, client, vaultPDA)))
 }
 
 func balance(ctx context.Context, client *rpc.Client, key solana.PublicKey) uint64 {
